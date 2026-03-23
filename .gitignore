@@ -2,3 +2,5 @@
 fine-tune/raw-data/
 fine-tune/mlx-data/
 .venv/
+./persisted/chroma_db/*
+./persisted/logs/*
