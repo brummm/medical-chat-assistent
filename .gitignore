@@ -1,0 +1,4 @@
+# Ignore fine-tuning raw data
+fine-tune/raw-data/
+fine-tune/mlx-data/
+.venv/

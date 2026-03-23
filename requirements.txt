@@ -1,0 +1,7 @@
+mlx-lm
+datasets
+transformers
+peft
+sentencepiece
+chromadb
+sentence-transformers
