@@ -169,9 +169,21 @@ def main():
             "<|start_header_id|>assistant<|end_header_id|>\n\n"
         )
         
+        # Setup Standalone Question Prompt for follow-ups
+        standalone_prompt = PromptTemplate.from_template(
+            "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
+            "Given the conversation history and a follow-up question, rephrase the follow-up question to be a standalone search query that explicitly includes the name of the specific medical condition being discussed. "
+            "Return ONLY the standalone query, without quotes or extra text.<|eot_id|>"
+            "<|start_header_id|>user<|end_header_id|>\n\n"
+            "Conversation History:\n{chat_history_text}\n"
+            "Follow-up Question: {input}<|eot_id|>"
+            "<|start_header_id|>assistant<|end_header_id|>\n\n"
+        )
+        
         # Modern chain setup: pipe operator
         chain = prompt_template | llm | StrOutputParser()
         hyde_chain = hyde_prompt | llm | StrOutputParser()
+        standalone_chain = standalone_prompt | llm | StrOutputParser()
         
         # Manually manage chat history
         chat_history = []
@@ -186,17 +198,29 @@ def main():
             if not user_input:
                 continue
 
-            # Step 1: Query Expansion (HyDE)
-            print("Analyzing symptoms for search expansion...", end="\r")
-            try:
-                expanded_query = hyde_chain.invoke({"input": user_input})
-                # Combine original symptoms and the expanded conditions for a richer vector search
-                search_query = f"{user_input} {expanded_query}"
-            except Exception as e:
-                search_query = user_input # Fallback if expansion fails
+            # Step 1: Query Routing (HyDE for first question, Standalone for follow-ups)
+            chat_history_text = format_chat_history(chat_history)
+            
+            if len(chat_history) == 0:
+                print("Analyzing symptoms for search expansion...", end="\r")
+                try:
+                    expanded_query = hyde_chain.invoke({"input": user_input})
+                    # Combine original symptoms and the expanded conditions for a richer vector search
+                    search_query = f"{user_input} {expanded_query}"
+                except Exception as e:
+                    search_query = user_input # Fallback if expansion fails
+            else:
+                print("Contextualizing follow-up question...   ", end="\r")
+                try:
+                    search_query = standalone_chain.invoke({
+                        "input": user_input,
+                        "chat_history_text": chat_history_text
+                    })
+                except Exception as e:
+                    search_query = user_input
 
             # Step 2: RAG Retrieval
-            print("Searching medical knowledge with expanded query...", end="\r")
+            print("Searching medical knowledge...                  ", end="\r")
             medical_context = retriever.retrieve(search_query)
 
             # Step 3: Final Generate Response
