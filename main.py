@@ -6,7 +6,7 @@ from typing import Any, List, Optional
 # LangChain imports
 from langchain_core.language_models.llms import LLM
 from langchain_core.callbacks.manager import CallbackManagerForLLMRun
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.prompts import PromptTemplate
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.output_parsers import StrOutputParser
 
@@ -75,6 +75,17 @@ def format_history_for_model(history, limit=3):
         
     return formatted
 
+def format_chat_history(chat_history):
+    formatted = ""
+    for msg in chat_history:
+        if isinstance(msg, HumanMessage):
+            formatted += f"Question: {msg.content}\n"
+        elif isinstance(msg, AIMessage):
+            # Clean the disclaimer from history so it doesn't loop or clutter context
+            clean_content = msg.content.replace("\n\n*** MANDATORY DISCLAIMER: Clinical validation by a physician is required before any medical action. ***", "")
+            formatted += f"Answer: {clean_content}\n\n"
+    return formatted
+
 def main():
     print("Initializing Medical Assistant...")
     db = MedicalDatabase()
@@ -134,28 +145,21 @@ def main():
         # Prepare History Context (Static)
         history_context = format_history_for_model(summary['full_history'])
 
-        # Setup modern LangChain Chain (LCEL)
-        prompt_template = ChatPromptTemplate.from_messages([
-            ("system", (
-                "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
-                "You are a professional medical assistant. Analyze the symptoms using the provided evidence.\n"
-                "Format your response strictly as follows:\n"
-                "Answer: [Detailed analysis]\n"
-                "Source: [URL from the medical info]\n\n"
-                "### SAFETY RULES:\n"
-                "- NEVER prescribe directly.\n"
-                "- MANDATORY DISCLAIMER: Your response MUST end with: 'Clinical validation by a physician is required before any medical action.' and the source URL.\n\n"
-                "### PATIENT HISTORY:\n{patient_history}\n\n"
-                "### MEDICAL REFERENCE INFO:\n{medical_context}<|eot_id|>"
-            )),
-            MessagesPlaceholder(variable_name="chat_history"),
-            ("human", "<|start_header_id|>user<|end_header_id|>\n\nQuestion: {input}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\nAnswer:")
-        ])
+        # Setup simple PromptTemplate matching fine-tuning format exactly
+        prompt_template = PromptTemplate.from_template(
+            "Relevant medical information:\n{medical_context}\n\n"
+            "Based on the information above, please answer the following question. "
+            "Include the source URL in your answer.\n\n"
+            "Patient History (For context only):\n{patient_history}\n\n"
+            "Conversation History:\n{chat_history_text}\n\n"
+            "Question: {input}\n"
+            "Answer:"
+        )
         
         # Modern chain setup: pipe operator
         chain = prompt_template | llm | StrOutputParser()
         
-        # Manually manage chat history for each patient session
+        # Manually manage chat history
         chat_history = []
 
         print(f"\nChatting with {info['name']}'s assistant. (Type 'exit' to go back)")
@@ -175,18 +179,26 @@ def main():
             # Generate Response
             print("Generating response...        ", end="\r")
             try:
+                # Format chat history as text for the prompt
+                chat_history_text = format_chat_history(chat_history)
+                
                 # Use invoke with the chain
                 response = chain.invoke({
                     "input": user_input,
                     "patient_history": history_context,
                     "medical_context": medical_context,
-                    "chat_history": chat_history
+                    "chat_history_text": chat_history_text
                 })
-                print(f"\nAssistant: {response}")
+                
+                # Programmatically append the mandatory disclaimer to guarantee compliance
+                disclaimer = "\n\n*** MANDATORY DISCLAIMER: Clinical validation by a physician is required before any medical action. ***"
+                final_response = response.strip() + disclaimer
+                
+                print(f"\nAssistant: {final_response}")
                 
                 # Append to history
                 chat_history.append(HumanMessage(content=user_input))
-                chat_history.append(AIMessage(content=response))
+                chat_history.append(AIMessage(content=final_response))
 
                 # Log the interaction for auditing
                 audit_logger.log_interaction(
@@ -194,7 +206,7 @@ def main():
                     user_input=user_input,
                     context_used=medical_context,
                     history_used=history_context,
-                    model_response=response
+                    model_response=final_response
                 )
                 
             except Exception as e:

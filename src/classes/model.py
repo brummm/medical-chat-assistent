@@ -1,4 +1,5 @@
 import os
+import re
 from mlx_lm import load, generate
 from mlx_lm.sample_utils import make_sampler
 
@@ -9,7 +10,7 @@ class MedicalModel:
         self.model = None
         self.tokenizer = None
         self.sampler = make_sampler(temp=0.1)
-        self.stop_tokens = ["<|eot_id|>", "<|end_of_text|>", "Question:"]
+        self.stop_tokens = ["<|eot_id|>", "<|end_of_text|>", "Question:", "\n---"]
 
     def load_model(self):
         """Loads the model and tokenizer, applying adapters if present."""
@@ -18,22 +19,28 @@ class MedicalModel:
         return self.model, self.tokenizer
 
     def clean_response(self, response):
-        """Truncate response at common stop tokens."""
+        """Truncate response at common stop tokens and force stop after Source."""
         for token in self.stop_tokens:
             if token in response:
                 response = response.split(token)[0]
+                
+        # Force truncate after the source URL to prevent trailing hallucinations
+        match = re.search(r'(Source:.*?)(?:\n|$)', response)
+        if match:
+            response = response[:match.end()]
+            
         return response.strip()
 
     def ask(self, user_question, context=None, max_tokens=1024):
-        """Generate and clean a response. If user_question contains Instruct headers, assume it's a pre-formatted prompt."""
+        """Generate and clean a response. Detects if prompt is already formatted."""
         if self.model is None or self.tokenizer is None:
             raise ValueError("Model and tokenizer must be loaded before calling ask().")
 
-        # Check if this is a raw LangChain prompt or just a simple question
-        if "<|start_header_id|>" in user_question:
+        # Detect if this is already a complete prompt from LangChain
+        if "<|start_header_id|>" in user_question or "Answer:" in user_question:
             prompt = user_question
         elif context:
-            # RAG Prompt (Backwards compatibility for non-LangChain calls)
+            # RAG Prompt (Backwards compatibility)
             prompt = (
                 f"Relevant medical information:\n{context}\n\n"
                 f"Based on the information above, please answer the following question. "
