@@ -65,7 +65,8 @@ To start the interactive medical assistant, run the following command from the p
 When running the main script, the assistant provides the following features:
 
 - **Patient Context Integration:** Prompts you to select a patient from the local database. The assistant automatically retrieves and analyzes the patient's age, sex, and last 3 medical visits (symptoms, diagnoses, prescriptions) to provide highly contextualized answers.
-- **Retrieval-Augmented Generation (RAG):** Uses ChromaDB to search through the entire MedQuAD dataset in real-time, fetching the most relevant medical evidence to ground its responses.
+- **HyDE Query Expansion:** Solves the "Asymmetric Semantic Search Problem" by using an internal LLM step to hypothesize potential diagnoses from raw symptoms *before* searching. This ensures the system finds the exact clinical literature required, rather than just matching generic symptom keywords.
+- **Retrieval-Augmented Generation (RAG):** Uses ChromaDB to search through the entire MedQuAD dataset in real-time with the expanded query, fetching the most relevant medical evidence to ground its responses.
 - **Source Citation:** Automatically appends the source URL of the medical information it used to formulate the answer.
 - **Conversational Memory:** Maintains context throughout the chat session, allowing for coherent follow-up questions.
 - **Strict Safety Guardrails:** Adheres to strict medical safety rules, preventing direct prescriptions and automatically appending a mandatory clinical validation disclaimer to every response.

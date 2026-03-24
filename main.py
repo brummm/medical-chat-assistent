@@ -79,11 +79,11 @@ def format_chat_history(chat_history):
     formatted = ""
     for msg in chat_history:
         if isinstance(msg, HumanMessage):
-            formatted += f"Question: {msg.content}\n"
+            formatted += f"User: {msg.content}\n"
         elif isinstance(msg, AIMessage):
             # Clean the disclaimer from history so it doesn't loop or clutter context
             clean_content = msg.content.replace("\n\n*** MANDATORY DISCLAIMER: Clinical validation by a physician is required before any medical action. ***", "")
-            formatted += f"Answer: {clean_content}\n\n"
+            formatted += f"Assistant: {clean_content}\n\n"
     return formatted
 
 def main():
@@ -145,19 +145,33 @@ def main():
         # Prepare History Context (Static)
         history_context = format_history_for_model(summary['full_history'])
 
-        # Setup simple PromptTemplate matching fine-tuning format exactly
+        # Setup simple PromptTemplate using strict Llama-3-Instruct formatting
         prompt_template = PromptTemplate.from_template(
-            "Relevant medical information:\n{medical_context}\n\n"
-            "Based on the information above, please answer the following question. "
-            "Include the source URL in your answer.\n\n"
-            "Patient History (For context only):\n{patient_history}\n\n"
-            "Conversation History:\n{chat_history_text}\n\n"
-            "Question: {input}\n"
-            "Answer:"
+            "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
+            "You are a medical assistant. You must analyze the CURRENT SYMPTOMS using the MEDICAL REFERENCE.\n"
+            "Do NOT diagnose the patient with their PAST DIAGNOSES. The past diagnoses are only for context.\n"
+            "Always end your response with \"Source: [URL]\".\n\n"
+            "MEDICAL REFERENCE:\n{medical_context}\n\n"
+            "PAST DIAGNOSES (Context only):\n{patient_history}\n\n"
+            "CONVERSATION HISTORY:\n{chat_history_text}<|eot_id|>"
+            "<|start_header_id|>user<|end_header_id|>\n\n"
+            "CURRENT SYMPTOMS: {input}<|eot_id|>"
+            "<|start_header_id|>assistant<|end_header_id|>\n\n"
+        )
+
+        # Setup HyDE Query Expansion Prompt
+        hyde_prompt = PromptTemplate.from_template(
+            "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
+            "You are a medical diagnostic expert. Based on the provided symptoms, list 3 possible medical conditions or diseases. "
+            "Return ONLY the names of the conditions, separated by commas. Do not include any other text.<|eot_id|>"
+            "<|start_header_id|>user<|end_header_id|>\n\n"
+            "Symptoms: {input}<|eot_id|>"
+            "<|start_header_id|>assistant<|end_header_id|>\n\n"
         )
         
         # Modern chain setup: pipe operator
         chain = prompt_template | llm | StrOutputParser()
+        hyde_chain = hyde_prompt | llm | StrOutputParser()
         
         # Manually manage chat history
         chat_history = []
@@ -172,12 +186,21 @@ def main():
             if not user_input:
                 continue
 
-            # RAG Retrieval
-            print("Searching medical knowledge...", end="\r")
-            medical_context = retriever.retrieve(user_input)
+            # Step 1: Query Expansion (HyDE)
+            print("Analyzing symptoms for search expansion...", end="\r")
+            try:
+                expanded_query = hyde_chain.invoke({"input": user_input})
+                # Combine original symptoms and the expanded conditions for a richer vector search
+                search_query = f"{user_input} {expanded_query}"
+            except Exception as e:
+                search_query = user_input # Fallback if expansion fails
 
-            # Generate Response
-            print("Generating response...        ", end="\r")
+            # Step 2: RAG Retrieval
+            print("Searching medical knowledge with expanded query...", end="\r")
+            medical_context = retriever.retrieve(search_query)
+
+            # Step 3: Final Generate Response
+            print("Generating final response...                    ", end="\r")
             try:
                 # Format chat history as text for the prompt
                 chat_history_text = format_chat_history(chat_history)
