@@ -35,7 +35,12 @@ class MedicalRetriever:
             data = json.loads(line)
             # The 'text' field contains "Question: ... \nAnswer: ... \nSource: ..."
             documents.append(data['text'])
-            metadatas.append({"source": data.get('source', 'Unknown')})
+            metadatas.append({
+                "source": data.get('source', 'Unknown'),
+                "focus": data.get('focus', 'Unknown'),
+                "semantic_group": data.get('semantic_group', 'Unknown'),
+                "qtype": data.get('qtype', 'Unknown')
+            })
             ids.append(f"id_{i}")
 
             # Batch add to avoid memory spikes
@@ -56,9 +61,9 @@ class MedicalRetriever:
             n_results=n_results
         )
         
-        # Combine documents into a single context string
+        # Combine documents into a single context string with clear labels
         context = ""
-        for doc in results['documents'][0]:
-            context += f"{doc}\n\n"
+        for i, doc in enumerate(results['documents'][0]):
+            context += f"--- MEDICAL REFERENCE {i+1} ---\n{doc}\n\n"
         
         return context.strip()

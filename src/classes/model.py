@@ -9,7 +9,7 @@ class MedicalModel:
         self.model = None
         self.tokenizer = None
         self.sampler = make_sampler(temp=0.1)
-        self.stop_tokens = ["<|eot_id|>", "<|end_of_text|>", "Question:", "\n---"]
+        self.stop_tokens = ["<|eot_id|>", "<|end_of_text|>", "Question:"]
 
     def load_model(self):
         """Loads the model and tokenizer, applying adapters if present."""
@@ -24,13 +24,16 @@ class MedicalModel:
                 response = response.split(token)[0]
         return response.strip()
 
-    def ask(self, user_question, context=None, max_tokens=512):
-        """Generate and clean a response for a given question, optionally using provided context (RAG)."""
+    def ask(self, user_question, context=None, max_tokens=1024):
+        """Generate and clean a response. If user_question contains Instruct headers, assume it's a pre-formatted prompt."""
         if self.model is None or self.tokenizer is None:
             raise ValueError("Model and tokenizer must be loaded before calling ask().")
 
-        if context:
-            # RAG Prompt
+        # Check if this is a raw LangChain prompt or just a simple question
+        if "<|start_header_id|>" in user_question:
+            prompt = user_question
+        elif context:
+            # RAG Prompt (Backwards compatibility for non-LangChain calls)
             prompt = (
                 f"Relevant medical information:\n{context}\n\n"
                 f"Based on the information above, please answer the following question. "

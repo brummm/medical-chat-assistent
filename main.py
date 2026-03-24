@@ -56,16 +56,23 @@ def get_patient_summary(db, patient_id):
             "full_history": history
         }
 
-def format_history_for_model(history):
+def format_history_for_model(history, limit=3):
     if not history:
         return "No previous visits recorded."
     
+    # history is already DESC from database
+    recent_history = history[:limit]
+    
     formatted = ""
-    for visit in reversed(history): # Chronological
+    for visit in reversed(recent_history): # Show in chronological order for the model
         formatted += f"- Date: {visit['timestamp']}\n"
         formatted += f"  Symptoms: {visit['symptoms']}\n"
         formatted += f"  Diagnoses: {', '.join(visit['diagnoses'])}\n"
         formatted += f"  Prescriptions: {', '.join(visit['prescriptions'])}\n\n"
+    
+    if len(history) > limit:
+        formatted = f"(Note: {len(history) - limit} older visits omitted for brevity)\n" + formatted
+        
     return formatted
 
 def main():
@@ -130,18 +137,19 @@ def main():
         # Setup modern LangChain Chain (LCEL)
         prompt_template = ChatPromptTemplate.from_messages([
             ("system", (
-                "You are a professional medical assistant designed ONLY to support clinicians. "
-                "### SAFETY GUARDRAILS (STRICT COMPLIANCE REQUIRED):\n"
-                "1. NEVER prescribe medication or treatment directly to a patient.\n"
-                "2. ALWAYS state that your suggestions MUST be reviewed and validated by a licensed physician.\n"
-                "3. Use the provided patient history and relevant medical information as reference only.\n"
-                "4. If you suggest a clinical path, include the rationale and Cite the Source from the medical info.\n"
-                "5. MANDATORY DISCLAIMER: Your response MUST end with: 'Clinical validation by a physician is required before any medical action.'\n\n"
-                "PATIENT HISTORY (reference only):\n{patient_history}\n\n"
-                "RELEVANT MEDICAL INFO:\n{medical_context}\n"
+                "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
+                "You are a professional medical assistant. Analyze the symptoms using the provided evidence.\n"
+                "Format your response strictly as follows:\n"
+                "Answer: [Detailed analysis]\n"
+                "Source: [URL from the medical info]\n\n"
+                "### SAFETY RULES:\n"
+                "- NEVER prescribe directly.\n"
+                "- MANDATORY DISCLAIMER: Your response MUST end with: 'Clinical validation by a physician is required before any medical action.' and the source URL.\n\n"
+                "### PATIENT HISTORY:\n{patient_history}\n\n"
+                "### MEDICAL REFERENCE INFO:\n{medical_context}<|eot_id|>"
             )),
             MessagesPlaceholder(variable_name="chat_history"),
-            ("human", "{input}")
+            ("human", "<|start_header_id|>user<|end_header_id|>\n\nQuestion: {input}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\nAnswer:")
         ])
         
         # Modern chain setup: pipe operator

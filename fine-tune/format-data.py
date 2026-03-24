@@ -13,14 +13,23 @@ def parse_xml_file(file_path):
         source_url = root.get('url') or ""
         
         # Extract common metadata
-        focus = root.findtext('Focus')
+        focus = root.findtext('Focus') or "Unknown"
+        semantic_group = "Unknown"
         
+        # Try to find SemanticGroup in different possible structures
+        # 1. Inside FocusAnnotations/UMLS/SemanticGroup
+        # 2. Directly inside UMLS/SemanticGroup (CDC style)
+        sg_elem = root.find('.//SemanticGroup')
+        if sg_elem is not None and sg_elem.text:
+            semantic_group = sg_elem.text
+
         qa_pairs = []
         # QAPairs
         for qa_pair in root.findall('QAPairs/QAPair'):
             question_elem = qa_pair.find('Question')
             if question_elem is not None:
                 question = question_elem.text
+                qtype = question_elem.get('qtype') or "Unknown"
                 answer = qa_pair.findtext('Answer')
                 
                 # Valid if it has an answer
@@ -28,7 +37,10 @@ def parse_xml_file(file_path):
                     qa_item = {
                         "Question": question.strip(),
                         "Answer": answer.strip(),
-                        "Source": source_url.strip()
+                        "Source": source_url.strip(),
+                        "Focus": focus.strip(),
+                        "SemanticGroup": semantic_group.strip(),
+                        "qtype": qtype.strip()
                     }
                     qa_pairs.append(qa_item)
                 
@@ -58,8 +70,6 @@ def main():
     print(f"Extracted {len(all_data)} valid question-answer pairs.")
     
     # Prepare MLX format (.jsonl)
-    # Construction: "Question: ...\nAnswer: ..."
-    # We'll do a simple 90/10 split for train/valid
     random.seed(42)
     random.shuffle(all_data)
     
@@ -70,10 +80,15 @@ def main():
     def save_jsonl(data_list, filename):
         with open(os.path.join(mlx_data_dir, filename), 'w', encoding='utf-8') as f:
             for item in data_list:
-                # We save the full metadata so a retriever can use it later
-                # and include it in the text field for potential fine-tuning
                 text = f"Question: {item['Question']}\nAnswer: {item['Answer']}\nSource: {item['Source']}"
-                f.write(json.dumps({"text": text, "source": item['Source']}) + "\n")
+                entry = {
+                    "text": text,
+                    "source": item['Source'],
+                    "focus": item['Focus'],
+                    "semantic_group": item['SemanticGroup'],
+                    "qtype": item['qtype']
+                }
+                f.write(json.dumps(entry) + "\n")
 
     save_jsonl(train_data, "train.jsonl")
     save_jsonl(valid_data, "valid.jsonl")
