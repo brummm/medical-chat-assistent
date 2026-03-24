@@ -2,3 +2,4 @@
 fine-tune/raw-data/
 fine-tune/mlx-data/
 .venv/
+_pycache_/
